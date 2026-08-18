@@ -14,5 +14,20 @@ name = "mathlib"
 scope = "leanprover-community"
 rev = "v4.34.0-rc1"
 
+[[require]]
+name = "leansqlite"
+scope = "leanprover"
+rev = "main"
+
+
 [[lean_lib]]
 name = "LOEIS"
+
+[[lean_lib]]
+name = "Scripts"
+roots = ["Scripts.OeisIngest"]
+globs = ["Scripts.OeisIngest.+"]
+
+[[lean_exe]]
+name = "oeis-ingest"
+root = "Scripts.OeisIngest"

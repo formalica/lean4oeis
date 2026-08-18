@@ -1,0 +1,131 @@
+import SQLite
+import Scripts.OeisIngest.Parse
+
+/-!
+SQLite schema and upsert logic for the OEIS metadata database.
+
+Columns that later stages fill in (`formalized_formula`, `status`,
+`main_definition_hash`, ...) are created here but left empty / `STATUS_UNKNOWN`.
+Re-running the ingest refreshes only the OEIS-derived columns, so formalization
+results written by other scripts survive.
+-/
+
+namespace Oeis.Db
+
+open SQLite
+
+/-- Status of a formula that has not been looked at by any formalization step yet. -/
+def statusUnknown : String := "STATUS_UNKNOWN"
+
+def schemaSql : String :=
+  "CREATE TABLE IF NOT EXISTS sequence (
+     name                           TEXT PRIMARY KEY,
+     title                          TEXT NOT NULL DEFAULT '',
+     \"offset\"                       INTEGER NOT NULL DEFAULT 0,
+     offset_first_big               INTEGER,
+     keywords                       TEXT NOT NULL DEFAULT '[]',
+     data                           TEXT NOT NULL DEFAULT '[]',
+     data_count                     INTEGER NOT NULL DEFAULT 0,
+     main_definition_hash           TEXT,
+     formalized_formula_hashes      TEXT NOT NULL DEFAULT '[]',
+     unformalized_formula_hashes    TEXT NOT NULL DEFAULT '[]',
+     all_unformalized_formulas_text TEXT NOT NULL DEFAULT '[]',
+     status                         TEXT NOT NULL DEFAULT 'STATUS_UNKNOWN',
+     source_file                    TEXT NOT NULL DEFAULT '',
+     updated_at                     TEXT
+   );
+
+   CREATE TABLE IF NOT EXISTS formula (
+     hash                  TEXT NOT NULL,
+     oeis_name             TEXT NOT NULL,
+     human_written_formula TEXT NOT NULL,
+     formalized_formula    TEXT NOT NULL DEFAULT '',
+     type                  TEXT NOT NULL DEFAULT '',
+     status                TEXT NOT NULL DEFAULT 'STATUS_UNKNOWN',
+     verification_values   TEXT NOT NULL DEFAULT '[]',
+     disproved_values      TEXT NOT NULL DEFAULT '[]',
+     additional_conditions TEXT NOT NULL DEFAULT '[]',
+     source_tag            TEXT NOT NULL DEFAULT 'F',
+     line_index            INTEGER,
+     PRIMARY KEY (oeis_name, hash)
+   );
+
+   CREATE INDEX IF NOT EXISTS formula_hash_idx ON formula (hash);
+   CREATE INDEX IF NOT EXISTS formula_status_idx ON formula (status);
+   CREATE INDEX IF NOT EXISTS sequence_status_idx ON sequence (status);"
+
+private def sequenceUpsertSql : String :=
+  "INSERT INTO sequence
+     (name, title, \"offset\", offset_first_big, keywords, data, data_count,
+      unformalized_formula_hashes, all_unformalized_formulas_text, source_file, updated_at)
+   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
+   ON CONFLICT(name) DO UPDATE SET
+     title = excluded.title,
+     \"offset\" = excluded.\"offset\",
+     offset_first_big = excluded.offset_first_big,
+     keywords = excluded.keywords,
+     data = excluded.data,
+     data_count = excluded.data_count,
+     unformalized_formula_hashes = excluded.unformalized_formula_hashes,
+     all_unformalized_formulas_text = excluded.all_unformalized_formulas_text,
+     source_file = excluded.source_file,
+     updated_at = excluded.updated_at;"
+
+private def formulaUpsertSql : String :=
+  "INSERT INTO formula (hash, oeis_name, human_written_formula, source_tag, line_index)
+   VALUES (?1, ?2, ?3, ?4, ?5)
+   ON CONFLICT(oeis_name, hash) DO UPDATE SET
+     human_written_formula = excluded.human_written_formula,
+     source_tag = excluded.source_tag,
+     line_index = excluded.line_index;"
+
+/-- Prepared statements reused for every sequence. -/
+structure Stmts where
+  sequence : Stmt
+  formula : Stmt
+
+def openDb (path : System.FilePath) : IO SQLite := do
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  let db ← SQLite.«open» path (busyTimeoutMs := 5000)
+  db.exec "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;"
+  db.exec schemaSql
+  return db
+
+def prepareStmts (db : SQLite) : IO Stmts := do
+  return { sequence := ← db.prepare sequenceUpsertSql, formula := ← db.prepare formulaUpsertSql }
+
+private def bindOptInt (stmt : Stmt) (index : Int32) : Option Int → IO Unit
+  | none => stmt.bindNull index
+  | some v => stmt.bindInt64 index (Int64.ofInt v)
+
+/-- Writes one sequence and all of its `%F` formulas. Caller owns the transaction. -/
+def upsertEntry (stmts : Stmts) (e : Entry) : IO Unit := do
+  let hashes := e.formulas.map formulaHash
+  let s := stmts.sequence
+  s.reset
+  s.bindText 1 e.name
+  s.bindText 2 e.title
+  s.bindInt64 3 (Int64.ofInt e.offset)
+  bindOptInt s 4 e.offsetFirstBig
+  s.bindText 5 (Json.strArray e.keywords)
+  s.bindText 6 (Json.termArray e.terms)
+  s.bindInt64 7 (Int64.ofNat e.terms.size)
+  s.bindText 8 (Json.strArray hashes)
+  s.bindText 9 (Json.strArray e.formulas)
+  s.bindText 10 e.sourceFile
+  s.exec
+
+  let f := stmts.formula
+  let mut i : Nat := 0
+  for (text, hash) in e.formulas.zip hashes do
+    f.reset
+    f.bindText 1 hash
+    f.bindText 2 e.name
+    f.bindText 3 text
+    f.bindText 4 "F"
+    f.bindInt64 5 (Int64.ofNat i)
+    f.exec
+    i := i + 1
+
+end Oeis.Db
