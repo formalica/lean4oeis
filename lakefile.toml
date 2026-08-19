@@ -8,6 +8,9 @@ pp.unicode.fun = true # pretty-prints `fun a ↦ b`
 relaxedAutoImplicit = false
 weak.linter.mathlibStandardSet = true
 maxSynthPendingDepth = 3
+# Generated LOEIS skeletons have unused binders and long term lists by construction.
+weak.linter.unusedVariables = false
+weak.linter.style.longLine = false
 
 [[require]]
 name = "mathlib"
@@ -22,12 +25,17 @@ rev = "main"
 
 [[lean_lib]]
 name = "LOEIS"
+globs = ["LOEIS.+"]
 
 [[lean_lib]]
 name = "Scripts"
-roots = ["Scripts.OeisIngest"]
-globs = ["Scripts.OeisIngest.+"]
+roots = ["Scripts.OeisIngest", "Scripts.OeisGen"]
+globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+"]
 
 [[lean_exe]]
 name = "oeis-ingest"
 root = "Scripts.OeisIngest"
+
+[[lean_exe]]
+name = "oeis-gen"
+root = "Scripts.OeisGen"

@@ -35,10 +35,37 @@ official OEIS "internal format").
 
 ## Current state
 
-Step 1 of SPEC.md (metadata tables) is **done**. Nothing else is implemented yet.
+Step 1 of SPEC.md (metadata tables) is **done**, and the `Defs.lean` / `Data.lean` skeleton
+generator is **done**. Formula parsing / real definitions are not started.
 
 The ingest executable walks `oeisdata/seq`, parses every `.seq` file, and populates a SQLite
-database at `Metadata/oeis.db` (git-ignored, ~360 MB).
+database at `Metadata/oeis.db` (git-ignored, ~360 MB). The generator reads that DB and writes
+`LOEIS/<bucket>/<name>/{Defs,Data}.lean` where every declaration is `sorry`.
+
+### Generated skeleton shape
+
+`argType` from the OEIS offset:
+
+| offset | `argType` | `fn` generated? |
+| --- | --- | --- |
+| `0` | `Nat` | yes |
+| `1` | `PNat` | yes |
+| `k ≥ 2` | `{n : Nat // k ≤ n}` | yes |
+| `k < 0` | `{n : Int // k ≤ n}` | no (SPEC: skip `fn` for Int-based argTypes) |
+
+`retType` is `Int` if any known term is negative, else `Nat`.
+
+`tabl` / `tabf` sequences (31,428 of them) are two-argument in reality; for now they get a
+flattened API and every name gains a prefix: `flat`, `flatArgType`, `flatRetType`, `flatOffset`,
+`flatFn`, `flatFz`, `flatProp`, `flatData`, and `flat_prop_correct`, `flat_fn_eq`, `flat_fz_eq`,
+`flat_fn_eq_fz`, `flat_data_eq`, `flat_data_eq_fn`, `flat_data_eq_fz`. Non-flat sequences keep
+the main definition at top level (`def A000001 : A000001.argType → A000001.retType`); flat ones
+put it inside the namespace as `A000012.flat`.
+
+`data` holds every term OEIS knows, indexed from `offset`, so `a(n) = data[n - offset]`.
+
+Aggregators are rebuilt from the filesystem on every run: `LOEIS/<bucket>/{Defs,Data}.lean`
+import each sequence, and `LOEIS/{Defs,Data}.lean` import each bucket.
 
 ### Files
 
@@ -48,7 +75,9 @@ database at `Metadata/oeis.db` (git-ignored, ~360 MB).
 | [Scripts/OeisIngest/Parse.lean](Scripts/OeisIngest/Parse.lean) | `.seq` record parser, `Entry` struct, `formulaHash` |
 | [Scripts/OeisIngest/Db.lean](Scripts/OeisIngest/Db.lean) | schema DDL, prepared upsert statements |
 | [Scripts/OeisIngest/Json.lean](Scripts/OeisIngest/Json.lean) | minimal JSON array/string emitter, hex encoder |
-| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` lean_exe |
+| [Scripts/OeisGen.lean](Scripts/OeisGen.lean) | `main`, CLI args, DB query, file writing, aggregators |
+| [Scripts/OeisGen/Render.lean](Scripts/OeisGen/Render.lean) | `Defs.lean` / `Data.lean` text templates, `ArgKind`, `Names` |
+| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` lean_exe, `LOEIS.+` glob |
 
 ### Parsed OEIS record tags
 
@@ -97,10 +126,16 @@ PRIMARY KEY `(oeis_name, hash)`; indexes on `hash` and `status`.
 ```bash
 lake build oeis-ingest
 lake exe oeis-ingest [--seq-dir oeisdata/seq] [--db Metadata/oeis.db] [--limit N]
+
+lake build oeis-gen
+lake exe oeis-gen [--db Metadata/oeis.db] [--out LOEIS] [--all] [--bucket A000]... [--seq A000001]... [--force]
 ```
 
 `--limit N` truncates to the first N `.seq` files — use it for fast iteration.
-Full run: ~2m25s, 396,006 sequences, 527,877 formula rows.
+Full ingest run: ~2m25s, 396,006 sequences, 527,877 formula rows.
+
+`oeis-gen` never overwrites an existing file unless `--force` is passed, so later stages that
+replace `sorry` with real definitions are safe from regeneration.
 
 No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite3; ..."`.
 
@@ -117,6 +152,11 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 - **Multi-line `%F` blocks stay split one-row-per-line for now.** Lines that carry no formula
   (e.g. `"From _Mitch Harris_, ... (Start)"`, `"(End)"`) are expected to just fail to parse
   later and be skipped — no special-casing needed at ingest time.
+- **Subtype bounds use `offset ≤ n`**, consistent with `PNat` for offset 1 and `Nat` for offset 0.
+- **Generated files import `Mathlib.Tactic` + `Mathlib.Data.PNat.Defs`.**
+- **Linter options live in `lakefile.toml`, never in generated files** —
+  `weak.linter.unusedVariables = false` and `weak.linter.style.longLine = false`, because the
+  skeletons have unused binders (proofs are `sorry`) and very long term lists by construction.
 
 ## Lean 4.34 gotchas (this toolchain)
 
@@ -142,7 +182,12 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
    formalized, so the remainder converges on pure "properties".
 3. Formula AST + parser (`generate_lseq`), type inference, interpretation search
    (`Nat` → `Int` → `Real`, main def → `fn` → `fz`), validated against `sequence.data`.
-4. Lean file generation into `Axxx/Axxxxxx/`.
+4. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
+   `Basic_<hash>.lean` from the `%F` formulas.
+5. `tabl`/`tabf` sequences currently get the flattened one-argument API only; the real
+   two-argument version is deferred.
+6. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
+   impractical. Revisit if the A000 bucket build turns out too slow.
 
 ## Progress log
 
@@ -157,6 +202,12 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   Confirmed with user: `%C` lines stay excluded (already the case), and standalone `%F`
   continuation lines like `(Start)`/`(End)` are fine to keep as their own formula rows — the
   later formalization parser is expected to just skip them silently.
+- **2026-08-19** — Added `oeis-gen`: renders `Defs.lean` + `Data.lean` skeletons (all `sorry`)
+  per sequence, plus bucket and root aggregators. Verified all four `argType` shapes and the
+  flat/`tabl` variant compile: `A000001` (Nat), `A000027` (PNat + tabl), `A000063` (offset 5
+  subtype), `A000297` (offset -1, Int subtype, no `fn`), `A000023`/`A000036` (Int retType).
+  Moved the `unusedVariables` / `longLine` linter options out of generated files into
+  `lakefile.toml`.
 
 ## RULE 0 reminder
 
