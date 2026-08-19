@@ -208,6 +208,8 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   subtype), `A000297` (offset -1, Int subtype, no `fn`), `A000023`/`A000036` (Int retType).
   Moved the `unusedVariables` / `longLine` linter options out of generated files into
   `lakefile.toml`.
+- **2026-08-20** — Rewrote README.md: elan/toolchain setup, `lake exe cache get`, oeisdata
+  acquisition pointer, then the three-step ingest → gen → build pipeline with common flags.
 
 ## RULE 0 reminder
 
