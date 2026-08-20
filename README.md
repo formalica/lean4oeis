@@ -1,7 +1,6 @@
 ---
-dataset_info:
 language:
-- lean4
+- code
 license: cc-by-sa-4.0
 pretty_name: LOEIS - Lean OEIS Formalization
 size_categories:
@@ -10,11 +9,10 @@ source_datasets:
 - OEIS
 tags:
 - mathematics
+- formal-verification
 - lean
 - oeis
 - sequence-formalization
-task_ids:
-- sequence-annotation
 ---
 
 # LOEIS

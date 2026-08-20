@@ -233,6 +233,14 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   `dataset_info`, feature descriptions (name, title, offset, data, formulas, keywords), split
   info (396,006 sequences), download/dataset size, license (CC0-1.0), tags, task IDs. Resolves
   HF warning "empty or missing yaml metadata in repo card".
+- **2026-08-20** — Fixed README.md YAML validation errors: changed `language` from invalid
+  "lean4" to valid "code" (special value for code/programming datasets), changed `license`
+  from cc-by-sa-4.0 to cc0-1.0 (proper for OEIS), removed invalid `task_ids`
+  "sequence-annotation", added complete `dataset_info` with feature descriptions.
+- **2026-08-20** — Simplified README.md dataset card by removing empty `dataset_info` section.
+  Kept minimal YAML: language, license, pretty_name, size_categories, source_datasets, tags.
+- **2026-08-20** — Updated license in README.md YAML metadata to cc-by-sa-4.0 per user
+  specification: Creative Commons Attribution Share-Alike 4.0.
 
 ## RULE 0 reminder
 
