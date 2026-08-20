@@ -46,9 +46,9 @@ lake exe cache get   # download prebuilt Mathlib .olean files instead of buildin
 
 ### 3. Fetch the OEIS raw data (only if you want to rebuild the database)
 
-[`oeisdata`](https://github.com/oeis/oeisdata) is registered as a submodule, but you only ever
-need its `seq/` tree. Its `files/` tree holds 275,775 supporting-file entries that are useless
-here, so fetch sparsely:
+The raw data comes from [oeis/oeisdata](https://github.com/oeis/oeisdata) and is **not** part of
+this repository (`oeisdata/` is git-ignored). You only ever need its `seq/` tree — the `files/`
+tree holds 275,775 supporting-file entries that are useless here — so clone it sparsely:
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse \
@@ -56,9 +56,8 @@ git clone --depth 1 --filter=blob:none --sparse \
 git -C oeisdata sparse-checkout set seq
 ```
 
-That downloads ~1.6 GB (398,471 `.seq` files under `oeisdata/seq/A<bucket>/A<number>.seq`)
-instead of the full repository. To grab everything instead, use
-`git submodule update --init --depth 1 oeisdata`.
+That downloads ~1.6 GB (398,471 files at `oeisdata/seq/A<bucket>/A<number>.seq`) instead of the
+full repository.
 
 ### 4. Get the metadata database
 
@@ -122,3 +121,42 @@ lake build
 This compiles every generated sequence file plus the `LOEIS`/bucket aggregators. Expect
 `declaration uses 'sorry'` warnings — that's expected until the formula formalization step
 (see [AGENTS.md](AGENTS.md#open-items--next-steps)) is implemented.
+
+### Disk usage while building
+
+Lake writes a `*.setup.json` per module listing every transitively imported module. With
+`import Mathlib.Tactic` these are ~1.8 MB each and account for **93% of `.lake/build`**. They
+are inputs that Lake regenerates on demand and are not part of the up-to-date check, so prune
+them as you go:
+
+```bash
+lake exe oeis-cache stat     # size breakdown of .lake/build by file type
+lake exe oeis-cache prune    # delete *.setup.json
+```
+
+Building bucket-by-bucket and pruning in between keeps peak disk near ~100 GB instead of ~1.5 TB:
+
+```bash
+for b in LOEIS/A*; do
+  lake build "LOEIS.$(basename "$b")" && lake exe oeis-cache prune
+done
+```
+
+## Skip the build: use the prebuilt cache
+
+Rather than compiling everything yourself, restore the artifacts:
+
+```bash
+mkdir -p cache
+curl -L -o cache/loeis-build.tar.zst \
+  https://huggingface.co/datasets/formalica/lean4oeis/resolve/main/cache/loeis-build.tar.zst
+curl -L -o cache/manifest.json \
+  https://huggingface.co/datasets/formalica/lean4oeis/resolve/main/cache/manifest.json
+
+lake exe oeis-cache get
+lake build      # should be a no-op
+```
+
+`oeis-cache get` refuses to extract if `lean-toolchain` or `lake-manifest.json` differ from what
+the cache was built against; pass `--force` to override. You still need Mathlib's own oleans via
+`lake exe cache get`.

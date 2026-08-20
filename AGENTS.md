@@ -77,7 +77,8 @@ import each sequence, and `LOEIS/{Defs,Data}.lean` import each bucket.
 | [Scripts/OeisIngest/Json.lean](Scripts/OeisIngest/Json.lean) | minimal JSON array/string emitter, hex encoder |
 | [Scripts/OeisGen.lean](Scripts/OeisGen.lean) | `main`, CLI args, DB query, file writing, aggregators |
 | [Scripts/OeisGen/Render.lean](Scripts/OeisGen/Render.lean) | `Defs.lean` / `Data.lean` text templates, `ArgKind`, `Names` |
-| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` lean_exe, `LOEIS.+` glob |
+| [Scripts/OeisCache.lean](Scripts/OeisCache.lean) | `prune` / `stat` / `put` / `get` for `.lake/build` artifacts |
+| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` / `oeis-cache` lean_exe, `LOEIS.+` glob |
 
 ### Parsed OEIS record tags
 
@@ -129,6 +130,9 @@ lake exe oeis-ingest [--seq-dir oeisdata/seq] [--db Metadata/oeis.db] [--limit N
 
 lake build oeis-gen
 lake exe oeis-gen [--db Metadata/oeis.db] [--out LOEIS] [--all] [--bucket A000]... [--seq A000001]... [--force]
+
+lake build oeis-cache
+lake exe oeis-cache <prune|stat|put|get> [--archive PATH] [--manifest PATH] [--build-dir PATH] [--level N] [--force]
 ```
 
 `--limit N` truncates to the first N `.seq` files — use it for fast iteration.
@@ -160,11 +164,16 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 - **Hosting moves to Hugging Face**: `https://huggingface.co/datasets/formalica/lean4oeis`.
   GitHub is dropped (CI in `workflows/` is lost). All 792k `LOEIS/**.lean` files are committed
   raw, despite HF recommending <100k files per repo.
-- **`oeisdata` is a submodule** of `https://github.com/oeis/oeisdata`, fetched shallow + sparse
-  (`seq/` only). Its `files/` tree holds 275,775 LFS-pointer entries that we never need; its
-  `.lfsconfig` sets `fetchexclude = *` so LFS content is never downloaded anyway.
+- **`oeisdata` is NOT a submodule** — it stays git-ignored and users clone it themselves,
+  shallow + sparse (`seq/` only), from `https://github.com/oeis/oeisdata`.
 - **`Metadata/oeis.db` is committed via Git LFS** (`.gitattributes`), no longer git-ignored.
   HF upgrades LFS to Xet storage server-side.
+- **`*.setup.json` is pruned, never cached.** Lake writes one per module (~1.8 MB with
+  `import Mathlib.Tactic`) = 174 GB of the 187 GB build dir. `Module.checkArtifactsExist`
+  checks `.olean`/`.ilean`/`.c` but *not* `setup.json`, so deleting them is safe.
+  `.c` files (2.5 GB) **must** be kept or Lake rebuilds the module.
+- **`defaultFacets = ["leanArts"]` is a dead end** — it is already the Lake default, and `.c`
+  output is produced unconditionally as part of every module's artifacts.
 
 ## Lean 4.34 gotchas (this toolchain)
 
@@ -184,10 +193,9 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 
 ## Open items / next steps
 
-1. **Try `defaultFacets = ["leanArts"]` on the `LOEIS` lean_lib.** `.lake/build` is 189 GB for
-   only 98k of 792k modules, and 178 GB of that is `ir/` (`*.setup.json` at ~1.8 MB each plus
-   `*.c`). A library nothing links into shouldn't need C output; this would cut ~94% of the
-   build directory. A full build currently projects to ~1.5 TB.
+1. **Validate the prune+cache round trip on the `cache_test` branch.** Build `LOEIS.A000`,
+   `oeis-cache prune`, confirm `lake build LOEIS.A000` is still a no-op, then `put`, upload,
+   and `get` on another box.
 2. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
    line. Group them before treating each line as a standalone formula.
 3. Formula AST + parser (`generate_lseq`), type inference, interpretation search
@@ -198,9 +206,7 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
    two-argument version is deferred.
 6. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
    impractical. Revisit if the A000 bucket build turns out too slow.
-7. Ship the compiled `.lake/build/lib` (olean + ilean + trace) as one Xet-tracked archive so
-   users skip the rebuild. Use `zstd --rsyncable` so Xet chunk dedup survives regeneration.
-8. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
+7. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
 
 ## Progress log
 
@@ -229,6 +235,10 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   Confirmed oeisdata upstream is `github.com/oeis/oeisdata` (`seq/` 398,471 entries,
   `files/` 275,775). Un-ignored `oeisdata` and `Metadata/*.db`, added `.gitattributes` LFS rule,
   rewrote README setup section (clone → elan → sparse oeisdata → LFS database).
+- **2026-08-20** — Read Lake's `Build/Module.lean`: `.c` is emitted unconditionally and is part
+  of `checkArtifactsExist`, but `*.setup.json` is not — and it is 174 GB of the 187 GB build
+  dir. Added `oeis-cache` (`prune`/`stat`/`put`/`get`), reverted oeisdata to a manual sparse
+  clone, documented disk-usage strategy and cache download in README.
 - **2026-08-20** — Added Hugging Face dataset card to README.md: YAML metadata block with
   `dataset_info`, feature descriptions (name, title, offset, data, formulas, keywords), split
   info (396,006 sequences), download/dataset size, license (CC0-1.0), tags, task IDs. Resolves

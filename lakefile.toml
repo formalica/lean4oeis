@@ -29,8 +29,8 @@ globs = ["LOEIS.+"]
 
 [[lean_lib]]
 name = "Scripts"
-roots = ["Scripts.OeisIngest", "Scripts.OeisGen"]
-globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+"]
+roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]
+globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache"]
 
 [[lean_exe]]
 name = "oeis-ingest"
@@ -39,3 +39,7 @@ root = "Scripts.OeisIngest"
 [[lean_exe]]
 name = "oeis-gen"
 root = "Scripts.OeisGen"
+
+[[lean_exe]]
+name = "oeis-cache"
+root = "Scripts.OeisCache"

@@ -1,0 +1,7 @@
+{
+  "toolchain": "leanprover/lean4:v4.34.0-rc1",
+  "lakeManifestHash": "455d385148cd13de",
+  "lakefileHash": "b972da6ac742a7f4",
+  "archive": "cache/loeis-build.tar.zst",
+  "archiveBytes": 2130267506
+}
