@@ -157,6 +157,14 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 - **Linter options live in `lakefile.toml`, never in generated files** —
   `weak.linter.unusedVariables = false` and `weak.linter.style.longLine = false`, because the
   skeletons have unused binders (proofs are `sorry`) and very long term lists by construction.
+- **Hosting moves to Hugging Face**: `https://huggingface.co/datasets/formalica/lean4oeis`.
+  GitHub is dropped (CI in `workflows/` is lost). All 792k `LOEIS/**.lean` files are committed
+  raw, despite HF recommending <100k files per repo.
+- **`oeisdata` is a submodule** of `https://github.com/oeis/oeisdata`, fetched shallow + sparse
+  (`seq/` only). Its `files/` tree holds 275,775 LFS-pointer entries that we never need; its
+  `.lfsconfig` sets `fetchexclude = *` so LFS content is never downloaded anyway.
+- **`Metadata/oeis.db` is committed via Git LFS** (`.gitattributes`), no longer git-ignored.
+  HF upgrades LFS to Xet storage server-side.
 
 ## Lean 4.34 gotchas (this toolchain)
 
@@ -176,10 +184,12 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 
 ## Open items / next steps
 
-1. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
+1. **Try `defaultFacets = ["leanArts"]` on the `LOEIS` lean_lib.** `.lake/build` is 189 GB for
+   only 98k of 792k modules, and 178 GB of that is `ir/` (`*.setup.json` at ~1.8 MB each plus
+   `*.c`). A library nothing links into shouldn't need C output; this would cut ~94% of the
+   build directory. A full build currently projects to ~1.5 TB.
+2. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
    line. Group them before treating each line as a standalone formula.
-2. Stage-2 of SPEC.md: strip formulas from `all_unformalized_formulas_text` as they get
-   formalized, so the remainder converges on pure "properties".
 3. Formula AST + parser (`generate_lseq`), type inference, interpretation search
    (`Nat` → `Int` → `Real`, main def → `fn` → `fz`), validated against `sequence.data`.
 4. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
@@ -188,6 +198,9 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
    two-argument version is deferred.
 6. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
    impractical. Revisit if the A000 bucket build turns out too slow.
+7. Ship the compiled `.lake/build/lib` (olean + ilean + trace) as one Xet-tracked archive so
+   users skip the rebuild. Use `zstd --rsyncable` so Xet chunk dedup survives regeneration.
+8. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
 
 ## Progress log
 
@@ -208,6 +221,18 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   subtype), `A000297` (offset -1, Int subtype, no `fn`), `A000023`/`A000036` (Int retType).
   Moved the `unusedVariables` / `longLine` linter options out of generated files into
   `lakefile.toml`.
+- **2026-08-20** — Rewrote README.md: elan/toolchain setup, `lake exe cache get`, oeisdata
+  acquisition pointer, then the three-step ingest → gen → build pipeline with common flags.
+- **2026-08-20** — Planned the Hugging Face migration. Measured: `.lake/build` 189 GB (98k of
+  792k modules), of which `ir/` is 178 GB; oleans 9.6 GB; `LOEIS/` 4.6 GB / 792,809 files;
+  Mathlib is *not* in `.lake/build` (it lives in `.lake/packages/mathlib/.lake/build`, 6.5 GB).
+  Confirmed oeisdata upstream is `github.com/oeis/oeisdata` (`seq/` 398,471 entries,
+  `files/` 275,775). Un-ignored `oeisdata` and `Metadata/*.db`, added `.gitattributes` LFS rule,
+  rewrote README setup section (clone → elan → sparse oeisdata → LFS database).
+- **2026-08-20** — Added Hugging Face dataset card to README.md: YAML metadata block with
+  `dataset_info`, feature descriptions (name, title, offset, data, formulas, keywords), split
+  info (396,006 sequences), download/dataset size, license (CC0-1.0), tags, task IDs. Resolves
+  HF warning "empty or missing yaml metadata in repo card".
 
 ## RULE 0 reminder
 
