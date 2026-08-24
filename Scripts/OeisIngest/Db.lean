@@ -50,6 +50,103 @@ def schemaSql : String :=
      PRIMARY KEY (oeis_name, hash)
    );
 
+   CREATE TABLE IF NOT EXISTS program (
+     oeis_name   TEXT NOT NULL,
+     language    TEXT NOT NULL,
+     block_index INTEGER NOT NULL,
+     source_tag  TEXT NOT NULL,
+     text        TEXT NOT NULL,
+     hash        TEXT NOT NULL,
+     line_count  INTEGER NOT NULL DEFAULT 0,
+     status      TEXT NOT NULL DEFAULT 'STATUS_UNKNOWN',
+     PRIMARY KEY (oeis_name, language, block_index)
+   );
+
+   CREATE INDEX IF NOT EXISTS program_language_idx ON program (language);
+   CREATE INDEX IF NOT EXISTS program_hash_idx ON program (hash);
+   CREATE INDEX IF NOT EXISTS program_status_idx ON program (language, status);
+
+   CREATE TABLE IF NOT EXISTS formalization_batch (
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     language     TEXT NOT NULL DEFAULT 'maple',
+     model        TEXT NOT NULL DEFAULT '',
+     status       TEXT NOT NULL DEFAULT 'BATCH_PENDING',
+     oeis_names   TEXT NOT NULL DEFAULT '[]',
+     attempts     INTEGER NOT NULL DEFAULT 0,
+     max_attempts INTEGER NOT NULL DEFAULT 1,
+     chat_history TEXT NOT NULL DEFAULT '[]',
+     skill_text   TEXT NOT NULL DEFAULT '',
+     last_error   TEXT NOT NULL DEFAULT '',
+     usage        TEXT NOT NULL DEFAULT '{}',
+     created_at   TEXT,
+     updated_at   TEXT
+   );
+
+   CREATE INDEX IF NOT EXISTS formalization_batch_status_idx
+     ON formalization_batch (language, status);
+
+   CREATE TABLE IF NOT EXISTS formalization_item (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     batch_id        INTEGER NOT NULL,
+     oeis_name       TEXT NOT NULL,
+     language        TEXT NOT NULL DEFAULT 'maple',
+     source_hash     TEXT NOT NULL DEFAULT '',
+     formula_hash    TEXT NOT NULL,
+     original_text   TEXT NOT NULL DEFAULT '',
+     span_start      INTEGER,
+     span_end        INTEGER,
+     computable      INTEGER NOT NULL DEFAULT 1,
+     arg_kind        TEXT NOT NULL DEFAULT '',
+     lean_code       TEXT NOT NULL DEFAULT '',
+     lean_file       TEXT NOT NULL DEFAULT '',
+     check_file      TEXT NOT NULL DEFAULT '',
+     depends_on      TEXT NOT NULL DEFAULT '[]',
+     status          TEXT NOT NULL DEFAULT 'STATUS_UNKNOWN',
+     failure_kind    TEXT NOT NULL DEFAULT '',
+     failure_points  TEXT NOT NULL DEFAULT '[]',
+     compiler_output TEXT NOT NULL DEFAULT '',
+     verified_upto   INTEGER NOT NULL DEFAULT 0,
+     attempt         INTEGER NOT NULL DEFAULT 1,
+     notes           TEXT NOT NULL DEFAULT '',
+     created_at      TEXT,
+     updated_at      TEXT,
+     UNIQUE (batch_id, oeis_name, formula_hash)
+   );
+
+   CREATE INDEX IF NOT EXISTS formalization_item_batch_idx ON formalization_item (batch_id);
+   CREATE INDEX IF NOT EXISTS formalization_item_seq_idx ON formalization_item (oeis_name);
+   CREATE INDEX IF NOT EXISTS formalization_item_status_idx
+     ON formalization_item (language, status);
+
+   CREATE TABLE IF NOT EXISTS skill_suggestion (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     batch_id   INTEGER,
+     language   TEXT NOT NULL DEFAULT 'maple',
+     kind       TEXT NOT NULL DEFAULT 'note',
+     text       TEXT NOT NULL,
+     applied    INTEGER NOT NULL DEFAULT 0,
+     created_at TEXT
+   );
+
+   CREATE TABLE IF NOT EXISTS program_gap (
+     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+     batch_id    INTEGER,
+     oeis_name   TEXT NOT NULL,
+     language    TEXT NOT NULL DEFAULT 'maple',
+     source_hash TEXT NOT NULL DEFAULT '',
+     span_start  INTEGER NOT NULL,
+     span_end    INTEGER NOT NULL,
+     text        TEXT NOT NULL DEFAULT '',
+     status      TEXT NOT NULL DEFAULT 'STATUS_UNFORMALIZED',
+     reason      TEXT NOT NULL DEFAULT '',
+     created_at  TEXT,
+     updated_at  TEXT,
+     UNIQUE (oeis_name, language, source_hash, span_start, span_end)
+   );
+
+   CREATE INDEX IF NOT EXISTS program_gap_seq_idx ON program_gap (oeis_name, language);
+   CREATE INDEX IF NOT EXISTS program_gap_status_idx ON program_gap (language, status);
+
    CREATE INDEX IF NOT EXISTS formula_hash_idx ON formula (hash);
    CREATE INDEX IF NOT EXISTS formula_status_idx ON formula (status);
    CREATE INDEX IF NOT EXISTS sequence_status_idx ON sequence (status);"
@@ -79,10 +176,20 @@ private def formulaUpsertSql : String :=
      source_tag = excluded.source_tag,
      line_index = excluded.line_index;"
 
+private def programUpsertSql : String :=
+  "INSERT INTO program (oeis_name, language, block_index, source_tag, text, hash, line_count)
+   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+   ON CONFLICT(oeis_name, language, block_index) DO UPDATE SET
+     source_tag = excluded.source_tag,
+     text = excluded.text,
+     hash = excluded.hash,
+     line_count = excluded.line_count;"
+
 /-- Prepared statements reused for every sequence. -/
 structure Stmts where
   sequence : Stmt
   formula : Stmt
+  program : Stmt
 
 def openDb (path : System.FilePath) : IO SQLite := do
   if let some parent := path.parent then
@@ -93,7 +200,9 @@ def openDb (path : System.FilePath) : IO SQLite := do
   return db
 
 def prepareStmts (db : SQLite) : IO Stmts := do
-  return { sequence := ← db.prepare sequenceUpsertSql, formula := ← db.prepare formulaUpsertSql }
+  return { sequence := ← db.prepare sequenceUpsertSql
+           formula := ← db.prepare formulaUpsertSql
+           program := ← db.prepare programUpsertSql }
 
 private def bindOptInt (stmt : Stmt) (index : Int32) : Option Int → IO Unit
   | none => stmt.bindNull index
@@ -127,5 +236,17 @@ def upsertEntry (stmts : Stmts) (e : Entry) : IO Unit := do
     f.bindInt64 5 (Int64.ofNat i)
     f.exec
     i := i + 1
+
+  let p := stmts.program
+  for prog in e.programs do
+    p.reset
+    p.bindText 1 e.name
+    p.bindText 2 prog.language
+    p.bindInt64 3 (Int64.ofNat prog.blockIndex)
+    p.bindText 4 prog.sourceTag
+    p.bindText 5 prog.text
+    p.bindText 6 (formulaHash prog.text)
+    p.bindInt64 7 (Int64.ofNat (prog.text.splitOn "\n").length)
+    p.exec
 
 end Oeis.Db

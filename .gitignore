@@ -5,3 +5,8 @@ oeisdata/*
 /Metadata/*.db-shm
 A000027Data.lean
 A000792.lean
+
+.venv/
+__pycache__/
+*.egg-info/
+/Check/B*/

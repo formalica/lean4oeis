@@ -27,6 +27,11 @@ rev = "main"
 name = "LOEIS"
 globs = ["LOEIS.+"]
 
+# Scratch library for generated validation modules; not part of `defaultTargets`.
+[[lean_lib]]
+name = "Check"
+globs = ["Check.+"]
+
 [[lean_lib]]
 name = "Scripts"
 roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]

@@ -122,6 +122,32 @@ This compiles every generated sequence file plus the `LOEIS`/bucket aggregators.
 `declaration uses 'sorry'` warnings — that's expected until the formula formalization step
 (see [AGENTS.md](AGENTS.md#open-items--next-steps)) is implemented.
 
+## 4. Formalize OEIS program blocks with an LLM
+
+Maple (and later Mathematica / PARI / Python) programs attached to OEIS entries are translated
+into Lean by a batched LLM pipeline, compiled, and evaluated against the known terms.
+
+```bash
+uv venv && uv pip install -e .
+PYTHONPATH=Scripts .venv/bin/python -m formalize run --batch-size 5 --batches 1 --retry 2
+```
+
+A single OEIS program block usually merges several independent programs. The model delimits
+each one with a verbatim start/end anchor pair; everything no item claims is recorded as
+unformalized and fed back as a defect to fix. To see the result:
+
+```bash
+# every program block of one sequence, colour-coded:
+# one colour per formalized program, red for anything unformalized
+PYTHONPATH=Scripts .venv/bin/python -m formalize show --seq A000002
+
+# one batch in full: items, spans, lean code, gaps, and the model conversation
+PYTHONPATH=Scripts .venv/bin/python -m formalize show --batch-id 9 --history
+```
+
+See [FORMALIZE.md](FORMALIZE.md) for the full design, the database tables it writes and all
+available commands.
+
 ### Disk usage while building
 
 Lake writes a `*.setup.json` per module listing every transitively imported module. With

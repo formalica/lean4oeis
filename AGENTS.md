@@ -36,7 +36,8 @@ official OEIS "internal format").
 ## Current state
 
 Step 1 of SPEC.md (metadata tables) is **done**, and the `Defs.lean` / `Data.lean` skeleton
-generator is **done**. Formula parsing / real definitions are not started.
+generator is **done**. The **Maple → Lean LLM formalization pipeline is implemented** (see
+[FORMALIZE.md](FORMALIZE.md)); `%F` formula parsing / real main definitions are not started.
 
 The ingest executable walks `oeisdata/seq`, parses every `.seq` file, and populates a SQLite
 database at `Metadata/oeis.db` (git-ignored, ~360 MB). The generator reads that DB and writes
@@ -78,13 +79,17 @@ import each sequence, and `LOEIS/{Defs,Data}.lean` import each bucket.
 | [Scripts/OeisGen.lean](Scripts/OeisGen.lean) | `main`, CLI args, DB query, file writing, aggregators |
 | [Scripts/OeisGen/Render.lean](Scripts/OeisGen/Render.lean) | `Defs.lean` / `Data.lean` text templates, `ArgKind`, `Names` |
 | [Scripts/OeisCache.lean](Scripts/OeisCache.lean) | `prune` / `stat` / `put` / `get` for `.lake/build` artifacts |
-| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` / `oeis-cache` lean_exe, `LOEIS.+` glob |
+| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` / `oeis-cache` lean_exe, `LOEIS.+` and `Check.+` globs |
+| [FORMALIZE.md](FORMALIZE.md) | design doc for the LLM formalization pipeline |
+| [Skills/maple/SKILL.md](Skills/maple/SKILL.md) | Maple→Lean instructions + filterable function table |
+| [Check/Basic.lean](Check/Basic.lean) | `Oeis.Check.report`, throws on term mismatch so `lake build` fails |
+| [Scripts/formalize/](Scripts/formalize/) | the Python pipeline (`config`, `db`, `models`, `prompt`, `render`, `lean`, `agent`, `pipeline`, `spans`, `view`, `selftest`, `__main__`) |
 
 ### Parsed OEIS record tags
 
-`%S`/`%T`/`%U` terms · `%N` title · `%O` offset · `%K` keywords · `%F` formulas.
-Everything else (`%C`, `%D`, `%H`, `%e`, `%p`, `%t`, `%o`, `%Y`, `%A`, `%E`, `%I`) is ignored
-for now.
+`%S`/`%T`/`%U` terms · `%N` title · `%O` offset · `%K` keywords · `%F` formulas ·
+`%p` Maple / `%t` Mathematica / `%o` other-language programs (→ `program` table).
+Everything else (`%C`, `%D`, `%H`, `%e`, `%Y`, `%A`, `%E`, `%I`) is ignored for now.
 
 ## Database schema
 
@@ -122,6 +127,32 @@ PRIMARY KEY `(oeis_name, hash)`; indexes on `hash` and `status`.
 | `verification_values`, `disproved_values`, `additional_conditions` | *filled later* — `[]` |
 | `source_tag`, `line_index` | `'F'` and position within the sequence |
 
+### `program`
+
+PRIMARY KEY `(oeis_name, language, block_index)`; indexes on `language`, `hash`,
+`(language, status)`.
+
+| Column | Notes |
+| --- | --- |
+| `language` | `maple` (`%p`), `mathematica` (`%t`), or the lowercased `(Lang)` marker of `%o` |
+| `source_tag` | `p` / `t` / `o` |
+| `text` | block verbatim; `%p`/`%t` split at `# Alternative`, `%o` split at each `(Lang)` |
+| `hash` | `String.hash`, 16 hex chars — used as `formalization_item.source_hash` |
+| `line_count`, `status` | |
+
+### `formalization_batch` / `formalization_item` / `program_gap` / `skill_suggestion`
+
+Written by the Python pipeline; created by the Lean ingest's `schemaSql`.
+Full column list in [FORMALIZE.md](FORMALIZE.md#10-database). Key points:
+`formalization_batch.chat_history` stores serialized pydantic-ai messages (that is what makes
+`retry --batch-id` continue the same conversation), `skill_text` stores the filtered skill the
+model actually saw, and `formalization_item.failure_points` stores the disagreeing indices as
+`[{"n":…,"expected":…,"got":…}]`. `formalization_item.span_start`/`span_end` locate the item
+inside its block; `program_gap` holds the **complement** — every stretch of a program block no
+item claimed, as `STATUS_UNFORMALIZED` (a real missed program) or `STATUS_GAP_TRIVIAL`
+(whitespace / stray delimiters / an author-credit comment). Gap rows are rewritten wholesale
+per block on every run, so they never go stale.
+
 ## Commands
 
 ```bash
@@ -133,6 +164,14 @@ lake exe oeis-gen [--db Metadata/oeis.db] [--out LOEIS] [--all] [--bucket A000].
 
 lake build oeis-cache
 lake exe oeis-cache <prune|stat|put|get> [--archive PATH] [--manifest PATH] [--build-dir PATH] [--level N] [--force]
+
+uv venv && uv pip install -e .
+PYTHONPATH=Scripts .venv/bin/python -m formalize run   [--batch-size N] [--batches N] [--retry N] [--bucket A000] [--seq A000045] [--dry-run] [--learn] [--include-attempted] [--keep-check-files]
+PYTHONPATH=Scripts .venv/bin/python -m formalize retry --batch-id K [--retry N]
+PYTHONPATH=Scripts .venv/bin/python -m formalize show  --batch-id K [--history] [--limit N] [--color auto|always|never]
+PYTHONPATH=Scripts .venv/bin/python -m formalize show  --seq A000002 [--color auto|always|never]
+PYTHONPATH=Scripts .venv/bin/python -m formalize stats
+PYTHONPATH=Scripts .venv/bin/python -m formalize.selftest    # no model call
 ```
 
 `--limit N` truncates to the first N `.seq` files — use it for fast iteration.
@@ -174,6 +213,29 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   `.c` files (2.5 GB) **must** be kept or Lake rebuilds the module.
 - **`defaultFacets = ["leanArts"]` is a dead end** — it is already the Lake default, and `.c`
   output is produced unconditionally as part of every module's artifacts.
+- **LLM framework is pydantic-ai**, with `output_type=BatchResult` structured output.
+- **The agent gets no tools.** Lean is compiled by the pipeline on every attempt regardless, so
+  a "compile" tool would only burn tokens on a decision that is already made.
+- **Programs are delimited by anchors, not copied.** The model returns `start_marker` /
+  `end_marker` (verbatim, ≥6 chars, `end_marker` extended through the trailing author credit)
+  and `spans.resolve` backtracks to a non-overlapping assignment. Asking for the whole
+  `original_text` verbatim was unreliable — the model tidies whitespace and drops comments.
+  `original_text` is now the *resolved* `block[start:end]`.
+- **Everything unclaimed is recorded, never silently dropped.** `spans.gaps` computes the
+  complement of the accepted spans; non-trivial gaps become `STATUS_UNFORMALIZED` rows and are
+  fed back as a defect, so a batch with an open gap cannot reach `BATCH_OK`. `BatchResult.skipped`
+  lets the model explain a gap instead of translating it.
+- **`%p` / `%t` blocks are never split by the ingest** — splitting on `# Alternative` is
+  unreliable, so one block can hold several programs and the LLM step splits them.
+- **The `formula_eq` theorem is appended by the pipeline, never requested from the model**, and
+  is `sorry` — this stage only formalizes.
+- **Dependencies are validated through data-backed shims** in `Check/B<id>/`, because every
+  `LOEIS` main definition is still `sorry`. Asking a shim out of range is `STATUS_DEP_RANGE`,
+  a distinct outcome from a wrong translation.
+- **`computable = false` items are stored but never compiled** — generating functions / real
+  analysis wait for a later validation stage.
+- **`tabl` / `tabf` (multi-parameter) sequences are excluded** from formalization for now.
+- **Skill suggestions are stored, never auto-applied** (`skill_suggestion.applied = 0`).
 
 ## Lean 4.34 gotchas (this toolchain)
 
@@ -196,17 +258,27 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 1. **Validate the prune+cache round trip on the `cache_test` branch.** Build `LOEIS.A000`,
    `oeis-cache prune`, confirm `lake build LOEIS.A000` is still a no-op, then `put`, upload,
    and `get` on another box.
-2. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
+2. **Run the formalization pipeline at scale.** `uv pip install anthropic` is required for the
+   default `anthropic:claude-sonnet-4-5` model; the live path has not been exercised yet, only
+   `formalize.selftest` (offline) and `--dry-run`. First live target: re-run A000002 with
+   `--include-attempted` and confirm the model now returns **both** Maple programs, and that
+   `show --seq A000002` reports 100% coverage.
+3. **Re-run the sequences already attempted before the marker change.** Their `program_gap` rows
+   were backfilled from `original_text`, but the model was never asked to close them.
+3. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
    line. Group them before treating each line as a standalone formula.
-3. Formula AST + parser (`generate_lseq`), type inference, interpretation search
+4. Formula AST + parser (`generate_lseq`), type inference, interpretation search
    (`Nat` → `Int` → `Real`, main def → `fn` → `fz`), validated against `sequence.data`.
-4. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
+5. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
    `Basic_<hash>.lean` from the `%F` formulas.
-5. `tabl`/`tabf` sequences currently get the flattened one-argument API only; the real
-   two-argument version is deferred.
-6. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
+6. `tabl`/`tabf` sequences currently get the flattened one-argument API only; the real
+   two-argument version is deferred, and they are skipped by the formalization pipeline.
+7. Add `Skills/mathematica/SKILL.md`, `Skills/pari/SKILL.md`, ... — `language` is already a
+   column and a flag everywhere, nothing structural is missing.
+8. Prove the `formula_eq` theorems that the pipeline currently emits as `sorry`.
+9. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
    impractical. Revisit if the A000 bucket build turns out too slow.
-7. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
+10. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
 
 ## Progress log
 
@@ -251,6 +323,45 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   Kept minimal YAML: language, license, pretty_name, size_categories, source_datasets, tags.
 - **2026-08-20** — Updated license in README.md YAML metadata to cc-by-sa-4.0 per user
   specification: Creative Commons Attribution Share-Alike 4.0.
+- **2026-08-21** — Built the LLM formalization pipeline for Maple program blocks.
+  Lean side: ingest now parses `%p`/`%t`/`%o` into a new `program` table (splitting `%o` at
+  `(Lang)` markers and `%p`/`%t` at `# Alternative`), and `schemaSql` gained
+  `formalization_batch`, `formalization_item`, `skill_suggestion`; `lakefile.toml` gained the
+  `Check.+` glob. Python side: `Scripts/formalize/` (pydantic-ai, no tools) batches N blocks
+  from N distinct sequences into one call, sends a skill whose function table is filtered to the
+  functions actually present, includes referenced sequences with up to 3 already-verified
+  alternative definitions, validates `original_text` as a verbatim non-overlapping span, renders
+  `Equiv_<hash>.lean` + a `Check/B<id>/` module that evaluates the translation against OEIS terms
+  through data-backed dependency shims, runs one `lake build`, and classifies each item as
+  `STATUS_VERIFIED` / `COMPILE_ERROR` / `EVAL_MISMATCH` / `DEP_RANGE` / `NONCOMPUTABLE` /
+  `REJECTED`. Chat history is persisted so `retry --batch-id` continues the same conversation.
+  Wrote [FORMALIZE.md](FORMALIZE.md), `Skills/maple/SKILL.md` (10 function-table rows), and a
+  README section. Verified offline with `formalize.selftest`: 2 PASS, 1 deliberate
+  `STATUS_EVAL_MISMATCH` with parsed failure points. Fixed a table-filter bug where rows keyed
+  by non-identifiers (`!`, `numtheory[factorset]`) were always kept.
+- **2026-08-22** — Debugged A000002: its `%p` block holds **two** Maple programs (the `# Alternative`
+  split never happens — `%p`/`%t` are stored whole), the model returned only the Cloitre one, and
+  the first program vanished with no trace. Root cause was on the LLM side, invisible because
+  nothing tracked what was *not* claimed. Fixes:
+  * **Anchor-based spans.** `FormalizedProgram.original_text` → `start_marker` + `end_marker`
+    (verbatim, ≥6 chars, `end_marker` extended through the trailing author credit). Rewrote
+    `spans.py`: `resolve` enumerates every candidate span per item, orders by fewest candidates
+    and backtracks to a non-overlapping assignment, with specific rejection messages (too short,
+    only matches after collapsing whitespace, only the first chars match, all candidates overlap).
+  * **Gap tracking.** `spans.gaps` computes the complement of the accepted spans; `spans.is_trivial`
+    separates real missed programs from comment/whitespace leftovers. New `program_gap` table
+    (both in `Db.lean` `schemaSql` and the Python migration) rewritten per block on every run.
+    Non-trivial gaps are fed back as repair feedback, so a batch with an open gap can no longer
+    reach `BATCH_OK`. Added `BatchResult.skipped` so the model can explain a gap instead.
+  * **New `Scripts/formalize/view.py`.** `show --seq A000002` prints every program block of a
+    sequence colour-coded — one palette colour per formalized program, red for anything
+    unformalized or never processed — with a per-block legend and coverage percentage.
+    `show --batch-id K` now prints parsed usage, spans, `lean_code`, dependencies, gaps and,
+    with `--history`, the whole stored conversation turn by turn. Added `--color` / `--limit`.
+  * Backfilled `span_start`/`span_end` and gaps for the two existing items; `stats` now also
+    reports gap counts. Updated `Skills/maple/SKILL.md`, `FORMALIZE.md` (§2 corrected: `%p`/`%t`
+    are never split; new §5.1/§5.2 and `program_gap` docs) and README. `selftest` moved to the
+    marker contract: still 2 PASS + 1 deliberate `STATUS_EVAL_MISMATCH`, now plus reported gaps.
 
 ## RULE 0 reminder
 
