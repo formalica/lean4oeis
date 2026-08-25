@@ -34,8 +34,10 @@ globs = ["Check.+"]
 
 [[lean_lib]]
 name = "Scripts"
-roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]
-globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache"]
+roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache",
+         "Scripts.LinearRecurrenceWolfram"]
+globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache",
+         "Scripts.LinearRecurrenceWolfram"]
 
 [[lean_exe]]
 name = "oeis-ingest"
@@ -48,3 +50,7 @@ root = "Scripts.OeisGen"
 [[lean_exe]]
 name = "oeis-cache"
 root = "Scripts.OeisCache"
+
+[[lean_exe]]
+name = "oeis-linearrec"
+root = "Scripts.LinearRecurrenceWolfram"
