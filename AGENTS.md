@@ -193,23 +193,50 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 
 ## Open items / next steps
 
-1. **Validate the prune+cache round trip on the `cache_test` branch.** Build `LOEIS.A000`,
+1. **OEIS adapter (next stage):** map `Axxxxxx → [main def, .fn, .fz]` via
+   `Alt.constApp` + `Registry.overlay`, feed `%F` lines + `sequence.data` through
+   `Formula.findAll`, store formalized formulas back into the DB.
+2. **Validate the prune+cache round trip on the `cache_test` branch.** Build `LOEIS.A000`,
    `oeis-cache prune`, confirm `lake build LOEIS.A000` is still a no-op, then `put`, upload,
    and `get` on another box.
-2. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
+3. Multi-line `%F` blocks (`... (Start)` / `... (End)`) are currently split into one row per
    line. Group them before treating each line as a standalone formula.
-3. Formula AST + parser (`generate_lseq`), type inference, interpretation search
-   (`Nat` → `Int` → `Real`, main def → `fn` → `fz`), validated against `sequence.data`.
-4. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
+4. Parser stage 2: Prop targets, recurrences/self-reference, limits, derivatives, filtered
+   sums (`k | n`), Wolfram/LaTeX frontends onto the same AST.
+5. Fill the `sorry`s in `Defs.lean` from the parsed `%N` title, then `Equiv_<hash>.lean` /
    `Basic_<hash>.lean` from the `%F` formulas.
-5. `tabl`/`tabf` sequences currently get the flattened one-argument API only; the real
+6. `tabl`/`tabf` sequences currently get the flattened one-argument API only; the real
    two-argument version is deferred.
-6. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
+7. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
    impractical. Revisit if the A000 bucket build turns out too slow.
-7. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
+8. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
 
 ## Progress log
 
+- **2026-08-26** — FormulaParser test suite fully green (`lake build FormulaParser.Tests` →
+  "Build completed successfully"; segmentation/arithmetic/binders/api1/api2 all pass).
+  Last bug was `let cfg2 : Config` — ambiguous between `Meta.Config` and `Formula.Config`
+  after `open Lean Meta` — which error-recovered the whole `testsApi2` def into `sorry`, and
+  the interpreter then refused to evaluate the runner ("depends on 'sorry' axiom"). Diagnosis
+  recipe that worked: standalone scan command iterating `env.constants` for `value?.hasSorry`.
+  Removed scratch `FormulaParser/Dbg.lean`. Parser stage 1 complete.
+- **2026-08-26** — Implemented the stage-1 formula parser (OEIS.md §PARSER): new isolated
+  lean_lib `FormulaParser/` (imports Lean core only; elaboration layer needs Mathlib in the
+  caller's env). Modules: Basic (Ty lattice/coercions/Config), Ast (IR + signed-sum
+  canonicalization), Lex (unicode-normalizing tokenizer; `_Name_` attributions become
+  boundaries), Grammar (piece split, paren auto-close recovery, parse-everywhere + weighted-DP
+  selection, Pratt parser incl. sum/product/integral binder forms), Registry (typed
+  alternatives: multi-interpretation arithmetic incl. zpow, sqrt/log/floor/binomial/...;
+  `Alt.constApp` for OEIS A-number wiring), Search (type-directed capped candidate generation,
+  lossy floor/round finalizations only at result position), Elab (src→Syntax→elabTerm with
+  mvar/sorry guards), Parser (`findAll`/`findFirst?`/`parseAll`/`parseAst`). Tests:
+  `FormulaParser/Tests.lean`, ~36 tests in four groups run as separate scoped-heartbeat
+  commands; data validation via kernel `decide`. Toolchain gotchas discovered: multiline
+  record literals don't parse inside `partial def` bodies or `where` blocks; `mergeSort` needs
+  `≤` comparators for stable ties; `run_cmd` takes only a doSeq; postfix `!` notation
+  unavailable → use `Nat.factorial`; `whnfR` does not unfold regular defs (use kernel `decide`
+  for data checks); ascriptions do coerce on the numeric tower; `Nat.log` is curried
+  (`Nat.log base val`).
 - **2026-08-18** — Implemented SPEC.md step 1: `oeis-ingest` executable, `.seq` parser, JSON
   helpers, `sequence` + `formula` tables. Full ingest run: 396,006 sequences / 527,877
   formulas. Verified signed terms (`A001057`), 54-digit bignums (`A000178`), and upsert

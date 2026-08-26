@@ -27,6 +27,11 @@ rev = "main"
 name = "LOEIS"
 globs = ["LOEIS.+"]
 
+# Standalone formula parser (OEIS.md §PARSER). Imports Lean/core only — no LOEIS deps.
+[[lean_lib]]
+name = "FormulaParser"
+globs = ["FormulaParser.+"]
+
 [[lean_lib]]
 name = "Scripts"
 roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]
