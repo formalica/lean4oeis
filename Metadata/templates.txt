@@ -1,0 +1,29 @@
+"regex","frequency"
+"^%N A[0-9]+ Coordination sequence Gal\.[0-9]+\.[0-9]+\.[0-9]+",6070
+"^%N A[0-9]+ Number of walks within N\^3 \(the first octant of Z\^3\) starting at \([[:space:]]*0,[[:space:]]*0,[[:space:]]*0[[:space:]]*\)(,[[:space:]]*)?[[:space:]]*and[[:space:]]+consisting[[:space:]]+of ([0-9]+[[:space:]]*\*?[[:space:]]*)?n steps taken from \{[^{}]*\}",3254
+"^%N A[0-9]+ Number of nX[0-9]+ [0-9]+\.\.[0-9]+ arrays with every element (un)?equal to [0-9]([[:space:]]*,?[[:space:]]*([0-9]|[0-9]+ or [0-9]))+ king",1390
+"^%N A[0-9]+ 1/[0-9]+ (of |times )?the number of ",594
+"^%N A[0-9]+ a\(n\) = Sum_\{k=0\.\.floor",591
+"^%N A[0-9]+ Decimal expansion of log_[0-9]+ ?\([0-9]+\)\.",482
+"^%N A[0-9]+ Number of \((n|[0-9])\+[0-9]\)[[:space:]]?X[[:space:]]?(\([0-9]\+[0-9]\)|\(n\+[0-9]\)) [0-9]+\.\.[0-9]+ arrays with every [0-9][[:space:]]?X[[:space:]]?[0-9] subblock having its diagonal sum differing from its antidiagonal sum by [0-9]",384
+"^%N A[0-9]+ Number of ([0-9]|\([0-9]\+[0-9]\))[[:space:]]?X[[:space:]]?([0-9]|\([0-9]\+[0-9]\)|n) ([0-9]+\.\.[0-9]+ )?arrays avoiding [0-9] [0-9] [0-9] and [0-9] [0-9] [0-9] horizontally and [0-9] [0-9] [0-9] and [0-9] [0-9] [0-9] vertically\.",287
+"^%N A[0-9]+ Number of n X n binary arrays symmetric under [0-9]+ degree rotation with all ones connected only in a ",282
+"^%N A[0-9]+ Number of nX[0-9]+ [0-9]+\.\.[0-9]+ arrays with each element x equal to the number its horizontal and vertical neighbors equal to ",359
+"^%N A[0-9]+ Number of nXnXn [0-9]+\.\.[0-9]+ triangular arrays with each element x equal to the number its neighbors equal to ",229
+"^%N A[0-9]+ Number of \(n\+[0-9]\)[[:space:]]?X[[:space:]]?(\([0-9]\+[0-9]\)|\(n\+[0-9]\)) [0-9]+\.\.[0-9]+ arrays with each [0-9][[:space:]]?X[[:space:]]?[0-9] subblock having clockwise perimeter pattern [0-9]+ [0-9]+ or [0-9]+\.",218
+"^%N A[0-9]+ Number of n X n binary arrays symmetric under horizontal reflection with all ones connected only in a ",144
+"^%N A[0-9]+ Number of n X n binary arrays symmetric about main diagonal with all ones connected only in a ",143
+"^%N A[0-9]+ Number of n X n binary arrays symmetric about both diagonal and antidiagonal with all ones connected only in a ",142
+"^%N A[0-9]+ Number of n X n binary arrays with all ones connected only in a ",142
+"^%N A[0-9]+ Number of n X n binary arrays symmetric under horizontal and vertical reflection with all ones connected only in a ",135
+"^%N A[0-9]+ a\(n\) = n\^[0-9]+ mod [0-9]+\.",188
+"^%N A[0-9]+ Number of n X n binary arrays symmetric about the diagonal and under [0-9]+ degree rotation with all ones connected only in a ",123
+"^%N A[0-9]+ Number of [0-9]+\*?n[[:space:]]?X[[:space:]]?n [0-9]+\.\.[0-9]+ arrays with row sums [0-9]+ and column sums [0-9]+\.",114
+"^%N A[0-9]+ [0-9]+(st|nd|rd|th) cyclotomic polynomial\.",126
+"^%N A[0-9]+ Number of walks within N\^2 \(the first quadrant of Z\^2\) starting at \([[:space:]]*0,[[:space:]]*0[[:space:]]*\),[[:space:]]*ending on the vertical axis(,[[:space:]]*)?[[:space:]]*and[[:space:]]+consisting[[:space:]]+of ([0-9]+[[:space:]]*\*?[[:space:]]*)?n steps taken from \{[^{}]*\}",129
+"^%N A[0-9]+ Number of walks within N\^2 \(the first quadrant of Z\^2\) starting at \([[:space:]]*0,[[:space:]]*0[[:space:]]*\)(,[[:space:]]*)?[[:space:]]*and[[:space:]]+consisting[[:space:]]+of ([0-9]+[[:space:]]*\*?[[:space:]]*)?n steps taken from",77
+"^%N A[0-9]+ Smallest k such that [0-9]+\^k has exactly n [0-9]'s in its decimal representation\.",74
+"^%N A[0-9]+ Central terms of triangles? A[0-9]+",53
+"^%N A[0-9]+ [0-9]+-almost primes",44
+"^%N A[0-9]+ Number of edge covers in",37
+"^%N A[0-9]+ Number of walks within N\^2 \(the first quadrant of Z\^2\) starting and ending at \([[:space:]]*0,[[:space:]]*0[[:space:]]*\)(,[[:space:]]*)?[[:space:]]*and[[:space:]]+consisting[[:space:]]+of ([0-9]+[[:space:]]*\*?[[:space:]]*)?n steps taken from \{[^{}]*\}",38

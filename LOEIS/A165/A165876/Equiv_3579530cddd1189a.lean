@@ -1,0 +1,35 @@
+import LOEIS.A165.A165876.Defs
+
+/-!
+# A165876 — program transcriptions (`Equiv_3579530cddd1189a`)
+
+Alternative computable definitions transcribed from the OEIS program snippets of this sequence:
+
+* `%F G.f.: (t^10 + 2*t^9 + 2*t^8 + 2*t^7 + 2*t^6 + 2*t^5 + 2*t^4 + 2*t^3 + 2*t^2 + 2*t + 1)/(105*t^10 - 14*t^9 - 14*t^8 - 14*t^7 - 14*t^6 - 14*t^5 - 14*t^4 - 14*t^3 - 14*t^2 - 14*t + 1).` (gf-rational)
+* `%T CoefficientList[Series[(1+t)*(1-t^10)/(1-15*t+129*t^10-105*t^11), {t, 0, 25}], t] (* _G. C. Greubel_, Apr 17 2016 *)` (wolfram-series)
+* `%T coxG[{10, 105, -14}]` (wolfram-coxG)
+* `%O (PARI) my(t='t+O('t^20)); Vec((1+t)*(1-t^10)/(1-15*t+129*t^10-105*t^11)) \\ _G. C. Greubel_, Aug 07 2017` (pari-vec)
+* `%O (Magma) R<t>:=PowerSeriesRing(Integers(), 20); Coefficients(R!( (1+t)*(1-t^10)/(1-15*t+129*t^10-105*t^11) )); // _G. C. Greubel_, Aug 10 2019` (magma-series)
+
+All delegate to the shared library `OEISLib.Coxeter.coxSeq` / `coeffsUpTo`; bridges are `rfl`.
+-/
+
+namespace A165876
+
+/-- Alternative definition transcribed from the `%F`/`%t`/`%o` program snippets (truncated coefficient list). -/
+def formula : List Nat := OEISLib.Coxeter.coeffsUpTo gParam rParam 25
+
+/-- `formula` is the generic truncated enumeration (definitionally). -/
+theorem formula_rfl : formula = OEISLib.Coxeter.coeffsUpTo gParam rParam 25 := rfl
+
+/-- **formula_eq**: reading `formula` position by position is exactly the main definition (when within bounds). -/
+theorem formula_eq (n : Nat) (h : n < formula.length) :
+    formula[n]'h = A165876 n := by
+  have h' : n < (OEISLib.Coxeter.coeffsUpTo gParam rParam 25).length := by
+    simpa [formula] using h
+  have h1 := OEISLib.Coxeter.coeffsUpTo_getElem gParam rParam 25 n h'
+  have h2 : A165876 n = OEISLib.Coxeter.coxSeq gParam rParam n := rfl
+  rw [h2]
+  simpa [formula] using h1
+
+end A165876

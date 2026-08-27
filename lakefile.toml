@@ -27,6 +27,11 @@ rev = "main"
 name = "LOEIS"
 globs = ["LOEIS.+"]
 
+# Shared generic libraries (walk counting etc.) used by template-generated sequence files.
+[[lean_lib]]
+name = "OEISLib"
+globs = ["OEISLib.+"]
+
 # Standalone formula parser (OEIS.md §PARSER). Imports Lean/core only — no LOEIS deps.
 [[lean_lib]]
 name = "FormulaParser"
@@ -34,8 +39,13 @@ globs = ["FormulaParser.+"]
 
 [[lean_lib]]
 name = "Scripts"
-roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]
-globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache"]
+roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache", "Scripts.OeisTemplate"]
+globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache",
+         "Scripts.OeisTemplate.+", "Scripts.Templates.+"]
+
+[[lean_exe]]
+name = "oeis-template"
+root = "Scripts.OeisTemplate"
 
 [[lean_exe]]
 name = "oeis-ingest"

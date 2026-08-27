@@ -112,7 +112,28 @@ lake exe oeis-gen --all --force               # overwrite already-generated file
 `oeis-gen` never overwrites an existing file unless `--force` is passed, so it's safe to rerun
 after later stages have replaced `sorry`s with real proofs.
 
-## 3. Build everything
+## 3. Formalize template families
+
+Families of sequences generated from a common OEIS template (~3254 "walks within N³"
+sequences, etc.) are formalized by the template runner. It replaces their skeleton
+`Defs.lean` with a real definition (via the shared `OEISLib` libraries), writes an
+`Equiv_<hash>.lean` with a proved equivalence to a low-level transcription of the Wolfram
+code, verifies the computation against the known terms, and marks the `%t` Wolfram snippet
+as formalized in `Metadata/oeis.db`:
+
+```bash
+lake build oeis-template
+lake exe oeis-template walkN3 --all --force    # first application needs --force
+lake exe oeis-template walkN3 --seq A147999    # idempotent afterwards; skips existing files
+lake exe oeis-template walkN3 --bucket A148 --dry-run
+```
+
+Only the template name and the sequence selection are mandatory; unrecognized flags are
+forwarded to the template (`--table-max=20`, `--check-cap=8`, ...). New templates are added
+as a plain function in `Scripts/Templates/<Name>.lean` plus one registry line — see
+[AGENTS.md](AGENTS.md).
+
+## 4. Build everything
 
 ```bash
 lake build
