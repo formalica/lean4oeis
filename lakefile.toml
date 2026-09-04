@@ -1,7 +1,7 @@
 name = "LOEIS"
 version = "0.1.0"
 keywords = ["math"]
-defaultTargets = ["LOEIS"]
+defaultTargets = ["LOEIS", "GenExprTests"]
 
 [leanOptions]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
@@ -37,6 +37,16 @@ name = "Scripts"
 roots = ["Scripts.OeisIngest", "Scripts.OeisGen", "Scripts.OeisCache"]
 globs = ["Scripts.OeisIngest.+", "Scripts.OeisGen.+", "Scripts.OeisCache"]
 
+# Standalone expression parser: no OEIS dependency, and no Mathlib import outside GenExpr.Verify
+# (Mathlib is loaded into a scratch environment at runtime instead).
+[[lean_lib]]
+name = "GenExpr"
+globs = ["GenExpr", "GenExpr.+"]
+
+[[lean_lib]]
+name = "GenExprTests"
+globs = ["GenExprTests", "GenExprTests.+"]
+
 [[lean_exe]]
 name = "oeis-ingest"
 root = "Scripts.OeisIngest"
@@ -48,3 +58,7 @@ root = "Scripts.OeisGen"
 [[lean_exe]]
 name = "oeis-cache"
 root = "Scripts.OeisCache"
+
+[[lean_exe]]
+name = "genexpr-test"
+root = "GenExprTests.Main"

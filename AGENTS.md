@@ -79,7 +79,9 @@ import each sequence, and `LOEIS/{Defs,Data}.lean` import each bucket.
 | [Scripts/OeisGen.lean](Scripts/OeisGen.lean) | `main`, CLI args, DB query, file writing, aggregators |
 | [Scripts/OeisGen/Render.lean](Scripts/OeisGen/Render.lean) | `Defs.lean` / `Data.lean` text templates, `ArgKind`, `Names` |
 | [Scripts/OeisCache.lean](Scripts/OeisCache.lean) | `prune` / `stat` / `put` / `get` for `.lake/build` artifacts |
-| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` / `oeis-cache` lean_exe, `LOEIS.+` and `Check.+` globs |
+| [GenExpr/](GenExpr/) | standalone expression parser (see [Spec.md](Spec.md) §GenExprParser) |
+| [GenExprTests/](GenExprTests/) | `#guard` suites + `lake exe genexpr-test` runner |
+| [lakefile.toml](lakefile.toml) | `Scripts` lean_lib + `oeis-ingest` / `oeis-gen` / `oeis-cache` lean_exe, `LOEIS.+`, `Check.+`, `GenExpr.+`, `GenExprTests.+` globs |
 | [FORMALIZE.md](FORMALIZE.md) | design doc for the LLM formalization pipeline |
 | [Skills/maple/SKILL.md](Skills/maple/SKILL.md) | Maple→Lean instructions + filterable function table |
 | [Check/Basic.lean](Check/Basic.lean) | `Oeis.Check.report`, throws on term mismatch so `lake build` fails |
@@ -165,6 +167,10 @@ lake exe oeis-gen [--db Metadata/oeis.db] [--out LOEIS] [--all] [--bucket A000].
 lake build oeis-cache
 lake exe oeis-cache <prune|stat|put|get> [--archive PATH] [--manifest PATH] [--build-dir PATH] [--level N] [--force]
 
+# GenExprParser: the `#guard` suites fail the build, the exe covers the acceptance corpus.
+lake build GenExprTests
+lake exe genexpr-test [--filter SUBSTRING] [--list]
+
 uv venv && uv pip install -e .
 PYTHONPATH=Scripts .venv/bin/python -m formalize run   [--batch-size N] [--batches N] [--retry N] [--bucket A000] [--seq A000045] [--dry-run] [--learn] [--include-attempted] [--keep-check-files]
 PYTHONPATH=Scripts .venv/bin/python -m formalize retry --batch-id K [--retry N]
@@ -237,6 +243,55 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 - **`tabl` / `tabf` (multi-parameter) sequences are excluded** from formalization for now.
 - **Skill suggestions are stored, never auto-applied** (`skill_suggestion.applied = 0`).
 
+### GenExprParser decisions
+
+- **`GenExpr/` is standalone**: it imports nothing from LOEIS/Scripts, and nothing from Mathlib
+  either — Mathlib will be loaded into a scratch environment at runtime by `GenExpr.Verify`.
+  That keeps ~90% of the tests running in milliseconds.
+- **Segmentation is a max-weight non-overlapping cover DP over every start position**, never
+  greedy leftmost-longest. `words (1+2*x^4)/(...)` parses fine as a call; it loses because the
+  call head is an unfillable hole, not because of any prose handling.
+- **Ambiguity is a costed list of parses, not an AST node.** The parser returns one result per
+  end position, which is also what the cover DP consumes.
+- **Operand positions use maximal munch** (`parseOperand`). Feeding short checkpoints back into
+  operator construction makes `3n^2 - 7*n` also parse as `(3n^2 - 7)*n`.
+- **A relation is never an operand**, so `a(n) = 0^n + n` has exactly one reading.
+- **Precedences mirror Lean's** so a rendered term re-parses to the same tree: rel 50, `+ -` 65,
+  `* / mod` 70, juxtaposition 72, unary `-` 75, `^` 75 (right, rbp 72 so `2^2n` reaches
+  `2^(2n)`), postfix `!` 90.
+- **Implicit multiplication requires glued tokens**, and `ident ident` is never a product — that
+  is what keeps `2 for` and `Dec 29 2012` out.
+- **A name used as a call head anywhere (`prescan.applied`) is a function hole wherever it is
+  unresolved**, including bare. This is what rejects `1 + T(x)` instead of reading it as `1 + T*x`.
+- **Fragments with no operator at all are dropped** (`Ast.hasStructure`): `a(n)` states nothing.
+- **A goal is never invented from scraps.** If the text plainly defines the requested name and we
+  fail to read that line, `plan` returns nothing rather than renaming a leftover sub-expression.
+- **Arithmetic alternatives are *transparent*** — usable only at their exact result type, never
+  cast. Everything else is *opaque* — usable at or below the context type, with the cast on its
+  result. Casts therefore only ever land on leaves and opaque results, which is what keeps
+  `(n-2) * 2^(2n-1)` at ℚ from becoming `↑(n - 2 : ℕ) * …`.
+- **Inference is a k-best table per result type, built bottom-up.** The table *is* the feasibility
+  analysis: "can this be ℚ?" is one array lookup, and there is no separate `feas` pass.
+- **Narrowed readings are always offered, not only as a fallback.** A formula can typecheck at the
+  requested type and still be wrong there (A084847), so `⌊…⌋₊` variants are ranked after the direct
+  ones rather than suppressed.
+- **ℕ chains are re-emitted additions-first and multiplications-first**, and only the *left spine*
+  is flattened — `a + (b - c)` is genuinely not `a + b - c` over ℕ.
+- **Bodies are stored name-free** with a `«self»` placeholder, so the same body can be re-rendered
+  under any name (Spec: `formalization_item` stores code "without any name").
+- **Normalization happens where the typing is produced, not where it is printed**, so the
+  interpreter and the renderer always see the same term.
+- **The interpreter is built on Lean's own `Nat`/`Int`/`Rat` operations**, so truncated
+  subtraction, floor division and Euclidean `Int` division agree with the emitted code by
+  construction. (`/` on `Int` in this toolchain is `ediv`: `(-7)/2 = -4`.)
+- **A recursive body cannot produce its own base cases**, so *any* outcome at a patchable prefix
+  position — mismatch, divergence, or an out-of-domain value — is repaired the same way. Only a
+  prefix is ever forgiven; a failure in the middle rejects the reading.
+- **The step budget lives in the interpreter, not in Lean.** A compiled Lean term cannot be
+  interrupted once running, which is why `internal` is the default engine.
+- **A call to a data-only function outside its table is `unknown`, not a failure** — the point
+  proves nothing rather than counting against the formula.
+
 ## Lean 4.34 gotchas (this toolchain)
 
 - `String.drop`/`take`/`takeWhile`/`dropWhile` return `String.Slice`, not `String`.
@@ -245,7 +300,22 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   `trimAsciiEnd` (they return `Slice`).
 - `String.mk` is deprecated; use `String.ofList`.
 - `String.Pos` is now dependent (`s.Pos`), so `⟨0⟩` literals and `posOf` are awkward — prefer
-  `splitOn` / list-based parsing.
+  `splitOn` / list-based parsing. `GenExpr.Input` sidesteps this with a char array plus a byte
+  offset table.
+- `#guard` evaluates `partial def`s (it goes through the compiler, not the kernel), so nested
+  inductive recursion in test helpers is fine.
+- A Lake glob `Foo.+` does **not** include the module `Foo` itself; write
+  `globs = ["Foo", "Foo.+"]`.
+- A module docstring must come *after* the `import` lines.
+- `have` is a keyword and cannot be used as a structure or constructor field name; so is `rec`.
+- `Array.get?` and `List.enum` are gone; use `arr[i]?` and an explicit counter.
+- A `let x := match …` inside a function needs an explicit type annotation, or dotted constructor
+  notation in the branches fails to resolve.
+- **A parameterless `def` is a closed term and is evaluated at module initialization**, before
+  `main` runs. `def run : Array Result := corpus.map runCase` therefore executed the whole test
+  corpus at process start and blew the stack; give such definitions a `Unit` parameter or drop
+  them. The interpreter (`#guard`, `lean --run`) does not show this, only the compiled binary.
+- `String.dropRight` is deprecated in favour of `String.dropEnd`, which returns a `Slice`.
 - `leansqlite` is built with `experimental.module`; `SQLite.open` must be written
   `SQLite.«open»`.
 - A `lean_exe` root outside any `lean_lib` glob will not get its imports built. The `Scripts`
@@ -279,6 +349,20 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
 9. Build cost: `import Mathlib.Tactic` in every generated file makes a full 396k-sequence build
    impractical. Revisit if the A000 bucket build turns out too slow.
 10. Consider exporting the DB to Parquet/JSONL — HF's dataset viewer cannot read SQLite.
+11. **Finish GenExprParser.** The pipeline is complete and green end to end: raw text → Lean that
+    elaborates, evaluates and matches the data. `lake exe genexpr-test` runs 23 acceptance cases.
+    Remaining:
+    * *Lean verification backend* — `GenExpr.Verify` currently implements the `internal` engine
+      only; `lean`, `internalThenLean` and `crossCheck` need `importModules` + elaboration of a
+      probe declaration against a cached environment.
+    * *Recursion ladder* — only the structural `match` form is emitted; well-founded
+      (`termination_by` / `decreasing_by`) and fuel forms are needed for `a(n) = a(n/2) + 1`.
+    * *`Prop` goals* — `PlanResult.relations` already collects the candidates
+      (`A046080(a(n)) = 1`); nothing turns them into theorems yet.
+    * *OEISParser* — the OEIS-specific wrapper that feeds sequences in as custom alternatives and
+      writes results to `formalization_item`.
+    * *Later* — LaTeX/Wolfram frontends (`GenExpr.Ast` is the extension point), `PowerSeries` /
+      `EReal` (`Ty` has an `other` constructor reserved).
 
 ## Progress log
 
@@ -361,7 +445,39 @@ No `sqlite3` CLI on this machine; inspect the DB with `python3 -c "import sqlite
   * Backfilled `span_start`/`span_end` and gaps for the two existing items; `stats` now also
     reports gap counts. Updated `Skills/maple/SKILL.md`, `FORMALIZE.md` (§2 corrected: `%p`/`%t`
     are never split; new §5.1/§5.2 and `program_gap` docs) and README. `selftest` moved to the
-    marker contract: still 2 PASS + 1 deliberate `STATUS_EVAL_MISMATCH`, now plus reported gaps.
+    marker contract: still 2 PASS + 1 deliberate `STATUS_EVAL_MISMATCH`, now plus reported gaps.- **2026-09-04** — Started GenExprParser (Spec.md §GenExprParser). Reviewed four independent
+  plans (`run1`–`run4`) and merged them; the decisions that survived are recorded under
+  [GenExprParser decisions](#genexprparser-decisions). Implemented and tested phase 1:
+  `GenExpr/{Types,Lexer,Ast,Analyze}.lean`, `GenExpr/Frontend/Raw/{Prescan,Parser,Segmenter}.lean`,
+  plus `GenExprTests/{LexerTests,ParserTests,SegmenterTests}.lean` (~90 `#guard`s) and the
+  `genexpr-test` runner skeleton. Two bugs found and fixed while iterating, both worth
+  remembering: parse *checkpoints* must not be reused as operands (otherwise `3n^2 - 7*n` also
+  reads as `(3n^2 - 7)*n`), and a relation must never be an operand (otherwise `a(n) = 0^n + n`
+  also reads as `(a(n) = 0^n) + n`). Every "important corner case" and "multiplication corner
+  case" from Spec.md now parses and segments to the expected tree, including extracting only the
+  generating function out of `another words (1+2*x^4)/(...). - _John Doe_, Dec 29 2012` and
+  rejecting `A(x) = 1 + T(x) - T^2(x)/2 + ...` with `unresolved name 'T'`.
+- **2026-09-04** — GenExprParser phases 2–4: `GenExpr/{Plan,Registry,Typed,Infer,Render}.lean`
+  plus `GenExprTests/{PlanTests,RenderTests}.lean`. Raw text now produces Lean that elaborates
+  and evaluates: checked against Mathlib that `3 * n ^ 2 + 6 - 7 * n`, `((n : ℤ) - 1).natAbs`,
+  `∑ k ∈ Finset.range (n + 1), k ^ 2`, `∑' k : ℕ, 1 / (k + 1 : ℝ) ^ 2`, `∫ x in (0 : ℝ)..1, x ^ 2`
+  and the structural `def A000330 : ℕ → ℕ | 0 => 0 | 1 => 1 | n + 2 => A000330 (n + 1) + (n+2)^2`
+  all compile, and that the A084847 reading `⌊2*3^n + ((n:ℚ)-2) * 2^(2*(n:ℤ)-1)⌋₊` reproduces
+  `1, 4, 18, 86, 418, 2022`. What cost the most to get right: transparent-vs-opaque alternatives
+  (so casts land on leaves only), always offering narrowed readings instead of treating them as a
+  fallback, giving applications precedence 1023 so nested calls parenthesise, and `simplifyOffsets`
+  so the shifted recursive call reads `A000330 (n + 1)` rather than `A000330 (n + 2 - 1)`.
+- **2026-09-04** — GenExprParser phases 5–6: `GenExpr/{Normalize,Eval/Interp,Verify,Api}.lean`,
+  `GenExprTests/{VerifyTests,Cases}.lean` and the `genexpr-test` runner. `analyze` now takes raw
+  text plus known values and returns checked Lean. Highlights: A084847 is rejected over ℕ and ℤ
+  and accepted on the fifth reading as `⌊2*3^n + ((n:ℚ)-2) * 2^(2*(n:ℤ)-1)⌋₊`; `a(n) = a(n-1)+n^2
+  for n > 1` becomes `def a : ℕ → ℕ | 0 => 0 | n + 1 => a n + (n + 1) ^ 2` with the base case
+  taken from the data because the text said `for n > 1`; Fibonacci needs `allowedFailures = 2`
+  and produces two arms. All 23 acceptance cases pass and every generated declaration was
+  compiled and evaluated against Mathlib. Two findings worth keeping: normalization had to move
+  out of the printer into `Infer` so the interpreter and the renderer share one term, and a
+  parameterless `def` is a closed term that Lean evaluates at module initialization — which ran
+  the whole test corpus before `main` started and overflowed the stack.
 
 ## RULE 0 reminder
 
